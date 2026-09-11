@@ -146,6 +146,10 @@ svg{display:block}
 @keyframes blink{0%,100%{box-shadow:inset 0 0 0 2px var(--green)}50%{box-shadow:none}}
 @media (prefers-reduced-motion:reduce){.x.look{animation:none; box-shadow:inset 0 0 0 2px var(--green)}}
 .x.rng{background:#e1efe7 !important; box-shadow:inset 0 0 0 1px #b5d8c5}
+.x.info{font-weight:700; color:var(--ink); font-size:13.5px; padding-right:8px}
+.x.urgent{color:#c00000}
+.x.score{background:#ffff00; color:#c00000; font-weight:700; font-size:15px; text-align:center; box-shadow:inset 0 0 0 2px #ff0000; z-index:2}
+.x.gone{display:none}
 .x.sel{outline:2px solid var(--green); outline-offset:-1px; z-index:6}
 .x.sel::after{content:""; position:absolute; right:-3px; bottom:-3px; width:6px; height:6px; background:var(--green); border:1px solid #fff; z-index:7}
 .h{background:var(--hdr); color:var(--hdr-ink); font:11.5px var(--ui); text-align:center; line-height:20px;
@@ -576,7 +580,12 @@ function secs(){ return Math.floor((acc+(running?Date.now()-t0:0))/1000); }
 function runClock(){ if(running||over||!live) return; t0=Date.now(); running=true; tick=setInterval(info,500); }
 function holdClock(){ if(!running) return; acc+=Date.now()-t0; running=false; if(tick){ clearInterval(tick); tick=null; } }
 function zeroClock(){ holdClock(); acc=0; }
-function info(){ if(infoEl) infoEl.textContent="오류 "+(M-marks)+"건 · 경과 "+clock(secs()); }
+function info(){
+  if(!infoEl||!isGame()) return;
+  if(over&&opened===C*R-M){ infoEl.className="x score"; infoEl.textContent="완료 · "+clock(secs()); return; }
+  infoEl.className="x info r"+(over?" urgent":"");
+  infoEl.textContent=(over?"#REF! · 경과 ":"오류 "+(M-marks)+"건 · 경과 ")+clock(secs());
+}
 
 /* ═══════════════════════════════════════════════════════
    게임 로직
@@ -702,7 +711,10 @@ function apHold(){ if(!apRun) return; apAcc+=Date.now()-apT0; apRun=false; if(ap
 function apInfo(){
   if(!isApple()) return;
   var left=apLeft();
-  if(infoEl) infoEl.textContent=(apOver?"종료":"남은 "+clock(left))+" · 정리 "+apScore+"개";
+  if(infoEl){
+    if(apOver){ infoEl.className="x score"; infoEl.textContent="총 "+apScore+"개 정리 완료"; }
+    else { infoEl.className="x info r"+(apLive&&left<=10?" urgent":""); infoEl.textContent="남은 "+clock(left)+" · 정리 "+apScore+"개"; }
+  }
   if(left<=0&&!apOver&&apLive) apEnd();
 }
 function apPaint(i){
@@ -758,7 +770,7 @@ function content(){
   if(isGame()){
     out.w[1]=110; for(j=0;j<C;j++) out.w[B_C+j]=46;
     put(1,1,R0.tTitle,"big spill");
-    put(1,B_C+C-1,"","r dim",{info:true});
+    put(1,B_C+C-5,"","info r",{info:true,span:5});
     put(B_R-1,1,R0.rowHdr,"th");
     for(j=0;j<C;j++) put(B_R-1,B_C+j,"9/"+(j+1),"th");
     for(i=0;i<R;i++){
@@ -772,7 +784,7 @@ function content(){
     if(!ap.length) apNew();
     out.w[1]=110; for(j=0;j<AP_C;j++) out.w[B_C+j]=46;
     put(1,1,R0.apTitle,"big spill");
-    put(1,B_C+AP_C-1,"","r dim",{info:true});
+    put(1,B_C+AP_C-5,"","info r",{info:true,span:5});
     put(B_R-1,1,R0.rowHdr,"th");
     for(j=0;j<AP_C;j++) put(B_R-1,B_C+j,"Z"+("0"+(j+1)).slice(-2),"th");
     for(i=0;i<AP_R;i++){
@@ -824,7 +836,7 @@ function content(){
 }
 
 function render(){
-  var ct=content(), i, j, r, c, html="", cols=[];
+  var ct=content(), i, j, r, c, html="", cols=[], skip=0;
   ncols=Math.max(ct.needC, Math.ceil(sw.clientWidth/64)+1, 12);
   nrows=Math.max(ct.needR, Math.ceil(sw.clientHeight/21)+1, 20);
   widths=[]; for(c=0;c<ncols;c++) widths.push(ct.w[c]||64);
@@ -837,8 +849,10 @@ function render(){
     html+='<div class="h rh" data-r="'+r+'">'+(r+1)+'</div>';
     for(c=0;c<ncols;c++){
       var o=ct.cells[r+","+c], cls="x", attrs="", t="";
+      if(skip>0){ skip--; cls+=" gone"; o=null; }
       if(o){
         cls+=" "+o.cls; t=esc(o.t);
+        if(o.span){ attrs+=' style="grid-column:span '+o.span+'"'; skip=o.span-1; }
         if(o.i!==undefined) attrs+=' data-i="'+o.i+'"';
         if(o.ri!==undefined) attrs+=' data-ri="'+o.ri+'"';
         if(o.all) attrs+=' data-all="1"';
@@ -855,14 +869,14 @@ function render(){
   for(r=0;r<nrows;r++) hdrR.push(ch[(r+1)*W]);
   if(isGame()){
     for(i=0;i<C*R;i++) nodes.push(cellAt(B_R+Math.floor(i/C),B_C+i%C));
-    infoEl=cellAt(1,B_C+C-1);
+    infoEl=cellAt(1,B_C+C-5);
     for(i=0;i<C*R;i++) paint(i);
     info();
   }
   apNodes=[]; rng=[]; drag=null;
   if(isApple()){
     for(i=0;i<AP_C*AP_R;i++) apNodes.push(cellAt(B_R+Math.floor(i/AP_C),B_C+i%AP_C));
-    infoEl=cellAt(1,B_C+AP_C-1);
+    infoEl=cellAt(1,B_C+AP_C-5);
     apInfo();
   }
   // 커서: 시트에 맞는 자연스러운 위치
