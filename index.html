@@ -181,6 +181,8 @@ svg{display:block}
 .zoom .rail::before{content:""; position:absolute; left:50%; top:-5px; width:1px; height:11px; background:#8a8a8a}
 .zoom .rail::after{content:""; position:absolute; left:50%; top:-4px; width:5px; height:9px; margin-left:-3px; background:#fff; border:1px solid #616161}
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 </head>
 <body>
 <div class="xl">
@@ -486,15 +488,23 @@ function rangeOf(i){
 }
 
 /* ═══════════════════════════════════════════════════════
-   기록 (로컬 저장 + 참조 코드)
+   기록 — 로컬 저장은 항상, 공유 서버(Firebase)가 있으면 자동 동기화,
+   서버가 없을 때만 참조 코드로 주고받는다
    ═══════════════════════════════════════════════════════ */
-function allRecs(){ try{ var v=JSON.parse(localStorage.getItem("xl.recs")||"[]"); return v instanceof Array?v:[]; }catch(e){ return []; } }
+function localRecs(){ try{ var v=JSON.parse(localStorage.getItem("xl.recs")||"[]"); return v instanceof Array?v:[]; }catch(e){ return []; } }
+function allRecs(){
+  var arr=localRecs(), i, k, byKey={};
+  for(i=0;i<arr.length;i++) byKey[arr[i].key]=arr[i];
+  for(k in cloud){ var c=cloud[k]; if(c&&typeof c.name==="string"&&typeof c.secs==="number"&&(!byKey[k]||c.secs<=byKey[k].secs)) byKey[k]={key:k,name:String(c.name).slice(0,12),lv:+c.lv,secs:c.secs,at:String(c.at||"").slice(0,5)}; }
+  var out=[]; for(k in byKey) out.push(byKey[k]);
+  return out;
+}
 function mergeRec(r){
   if(!r) return false;
   var name=String(r.name||"").replace(/\s+/g," ").trim().slice(0,12), g=+r.lv, t=+r.secs;
   if(!name||!(g>=0&&g<=2)||!(t>0&&t<86400)) return false;
   var rec={key:g+"_"+hash(name.toLowerCase()), name:name, lv:g, secs:Math.round(t), at:String(r.at||today()).slice(0,5)};
-  var arr=allRecs(), i, hit=-1;
+  var arr=localRecs(), i, hit=-1;
   for(i=0;i<arr.length;i++) if(arr[i].key===rec.key) hit=i;
   if(hit<0) arr.push(rec); else if(rec.secs<arr[hit].secs) arr[hit]=rec; else return false;
   try{ localStorage.setItem("xl.recs",JSON.stringify(arr.slice(-300))); }catch(e){}
@@ -517,6 +527,40 @@ function showCode(cs,label){
   try{ if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(cs); }catch(e){}
 }
 try{ myName=localStorage.getItem("xl.name")||""; }catch(e){}
+
+/* ── 공유 서버 (Firebase Realtime Database) ──────────────
+   FIREBASE_CONFIG 에 콘솔에서 받은 설정을 넣으면 켜진다.
+   null 이면 로컬 기록 + 참조 코드 방식으로만 동작한다. */
+var FIREBASE_CONFIG={
+  apiKey:"AIzaSyBbuTgYDX9sY6bBuEze73T8xzB1mqnby8A",
+  authDomain:"report-q3-df650.firebaseapp.com",
+  databaseURL:"https://report-q3-df650-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:"report-q3-df650",
+  storageBucket:"report-q3-df650.firebasestorage.app",
+  messagingSenderId:"862392830226",
+  appId:"1:862392830226:web:17d0d58d2c99b7b4f7cbcb"
+};
+var cloud={}, cloudOn=false, FB=null;
+(function(){
+  if(!FIREBASE_CONFIG||!window.firebase) return;
+  try{
+    firebase.initializeApp(FIREBASE_CONFIG);
+    FB=firebase.database();
+    FB.ref("records").on("value",function(snap){
+      cloud=snap.val()||{}; cloudOn=true;
+      if(cur==="sum"&&note===null) render();
+    },function(){ cloudOn=false; });
+  }catch(e){ FB=null; }
+})();
+function cloudPush(rec){
+  if(!FB) return;
+  try{
+    FB.ref("records/"+rec.key).transaction(function(old){
+      if(old&&typeof old.secs==="number"&&old.secs<=rec.secs) return; // 기존 기록이 더 빠르면 그대로
+      return {name:rec.name,lv:rec.lv,secs:rec.secs,at:rec.at};
+    });
+  }catch(e){}
+}
 
 /* ═══════════════════════════════════════════════════════
    시계 (게임 시트를 벗어나면 멈춘다)
@@ -623,9 +667,11 @@ function commit(){
   if(!nm){ el.focus(); return; }
   myName=nm; try{ localStorage.setItem("xl.name",nm); }catch(e){}
   var t=pending; pending=null;
-  var rec={name:nm,lv:lv,secs:t,at:today()}; mergeRec(rec); myKey=lv+"_"+hash(nm.toLowerCase());
+  var rec={name:nm,lv:lv,secs:t,at:today()}; mergeRec(rec); myKey=lv+"_"+hash(nm.toLowerCase()); rec.key=myKey;
+  cloudPush(rec);
   go("sum");
-  showCode(pack([rec]), nm+" "+dur(t));
+  if(cloudOn) say('<b class="ok">반영 완료</b> '+esc(nm)+' · '+dur(t)+' <span class="dim">실적이 공유 집계에 추가되었습니다.</span>');
+  else showCode(pack([rec]), nm+" "+dur(t));
 }
 function say(html){ note=html; fline.innerHTML=html; }
 
@@ -666,7 +712,7 @@ function content(){
     shown=[];
     var W=[88,70,60,78,80,64]; for(j=0;j<6;j++) out.w[1+j]=W[j];
     put(1,1,R0.sTitle,"big spill");
-    put(2,1,"집계 기준: 최근 처리분  ·  단위: 건  ·  작성: "+R0.who+"  ·  담당 "+Object.keys(who).length+"명  ·  행 선택 시 참조 코드 복사","dim spill");
+    put(2,1,"집계 기준: 최근 처리분  ·  단위: 건  ·  작성: "+R0.who+"  ·  담당 "+Object.keys(who).length+"명  ·  "+(cloudOn?"실시간 집계":"행 선택 시 참조 코드 복사"),"dim spill");
     for(j=0;j<6;j++) put(rr,1+j,R0.head[j],"th"); rr++;
     for(g=0;g<3;g++){
       var grp=[]; for(i=0;i<list.length;i++) if(list[i].lv===g) grp.push(list[i]);
