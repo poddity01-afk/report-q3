@@ -150,6 +150,9 @@ svg{display:block}
 .x.urgent{color:#c00000}
 .x.score{background:#ffff00; color:#c00000; font-weight:700; font-size:15px; text-align:center; box-shadow:inset 0 0 0 2px #ff0000; z-index:2}
 .x.gone{display:none}
+.x.heat{color:#3a3a3a; font-size:12px}
+.x.hit{font-weight:700; color:#000; box-shadow:inset 0 0 0 2px #7f6000}
+.x.heat.na{background:var(--bad-bg) !important}
 .x.sel{outline:2px solid var(--green); outline-offset:-1px; z-index:6}
 .x.sel::after{content:""; position:absolute; right:-3px; bottom:-3px; width:6px; height:6px; background:var(--green); border:1px solid #fff; z-index:7}
 .h{background:var(--hdr); color:var(--hdr-ink); font:11.5px var(--ui); text-align:center; line-height:20px;
@@ -397,19 +400,19 @@ svg{display:block}
    ═══════════════════════════════════════════════════════ */
 var ROLES=[
   { key:"물류", file:"2026_3Q_출고현황_물류팀_최종.xlsx",
-    sum:"일일보고", sheets:["출고현황","창고별 재고","노선별 상세"], raw:"출고원장", ap:"적재 배분", apTitle:"구역별 적재 잔량 정리 (합계 10 단위 소거)",
+    sum:"일일보고", sheets:["출고현황","창고별 재고","노선별 상세"], raw:"출고원장", ap:"적재 배분", apTitle:"구역별 적재 잔량 정리 (합계 10 단위 소거)", val:"출고 검증", valTitle:"9월 출고 데이터 검증", heat:"적재율 현황", heatTitle:"노선별 일자별 적재율 지수 (조건부 서식: 색조)",
     tTitle:"일자별 배송 이상 점검 (9월)", rowHdr:"노선", rowLbl:function(i){ return "R-"+("0"+(i+1)).slice(-2)+" "+["서울","경기","인천","부산","대구","광주","대전","울산","세종","강원","충북","충남","전북","전남","경북","경남"][i%16]; },
     sTitle:"노선별 처리 실적", who:"물류운영팀", head:["노선","담당","일자","처리 물량","소요 시간","정시율"],
     rawHead:["출고번호","일자","출고지","도착지","품목코드","수량","중량(kg)","운임","차량","상태"],
     rawW:[104,84,90,80,86,58,78,90,64,64], rawAlign:["l","c","l","l","l","r","r","r","c","c"] },
   { key:"영업", file:"2026_3Q_매출분석_최종_진짜최종.xlsx",
-    sum:"요약보고", sheets:["매출분석","채널별 요약","지역별 상세"], raw:"원본데이터", ap:"수량 조정", apTitle:"구역별 재고 잔량 정리 (합계 10 단위 소거)",
+    sum:"요약보고", sheets:["매출분석","채널별 요약","지역별 상세"], raw:"원본데이터", ap:"수량 조정", apTitle:"구역별 재고 잔량 정리 (합계 10 단위 소거)", val:"데이터 검증", valTitle:"9월 주문 데이터 검증", heat:"매출 히트맵", heatTitle:"품목별 일자별 매출 지수 (조건부 서식: 색조)",
     tTitle:"일자별 주문 오류 점검 (9월)", rowHdr:"품목코드", rowLbl:function(i){ return "SKU-"+(1001+i*7); },
     sTitle:"채널별 담당자 실적", who:"영업기획팀", head:["채널","담당","일자","처리 건수","처리 시간","달성률"],
     rawHead:["주문번호","일자","거래처","채널","품목코드","수량","단가","금액","담당","상태"],
     rawW:[104,84,92,70,86,54,80,96,64,64], rawAlign:["l","c","l","c","l","r","r","r","c","c"] },
   { key:"재무", file:"2026_3Q_손익계산_검토용_v7.xlsx",
-    sum:"결산요약", sheets:["손익요약","계정별 명세","부서별 배부"], raw:"전표원장", ap:"상계 처리", apTitle:"계정 간 상계 처리 (합계 10 단위 소거)",
+    sum:"결산요약", sheets:["손익요약","계정별 명세","부서별 배부"], raw:"전표원장", ap:"상계 처리", apTitle:"계정 간 상계 처리 (합계 10 단위 소거)", val:"전표 검증", valTitle:"9월 전표 데이터 검증", heat:"예산 집행률", heatTitle:"계정별 일자별 예산 집행 지수 (조건부 서식: 색조)",
     tTitle:"일자별 전표 오류 점검 (9월)", rowHdr:"계정", rowLbl:function(i){ return "계정 "+(4110+i*10); },
     sTitle:"계정별 마감 현황", who:"재무회계팀", head:["계정","담당","일자","항목 수","마감 시간","진척률"],
     rawHead:["전표번호","일자","계정과목","부서","적요","차변","대변","잔액","담당","승인"],
@@ -470,6 +473,21 @@ var AP_C=17, AP_R=10, AP_TIME=120;
 var ap=[], apNodes=[], apScore=0, apLive=false, apOver=false;
 var apAcc=0, apT0=0, apRun=false, apTick=null, drag=null, rng=[];
 
+/* ── 데이터 검증(오류 찾기) · 히트맵(숨은 그림) 공용 시계 ── */
+function Clock(onTick){
+  var c={acc:0,t0:0,run:false,tk:null};
+  c.secs=function(){ return Math.floor((c.acc+(c.run?Date.now()-c.t0:0))/1000); };
+  c.start=function(){ if(c.run) return; c.t0=Date.now(); c.run=true; c.tk=setInterval(onTick,250); };
+  c.hold=function(){ if(!c.run) return; c.acc+=Date.now()-c.t0; c.run=false; if(c.tk){ clearInterval(c.tk); c.tk=null; } };
+  c.reset=function(){ c.hold(); c.acc=0; };
+  c.add=function(sec){ c.acc+=sec*1000; };
+  return c;
+}
+var VL_N=8, VL_ROWS=40, VL_LIMIT=180, VL_PEN=5;
+var vl={rows:[],errs:[],found:0,live:false,over:false,hints:3,nodes:[],clock:null};
+var HT_C=28, HT_R=18, HT_N=5, HT_LIMIT=180, HT_PEN=5;
+var ht={vals:[],owner:[],shapes:[],found:0,live:false,over:false,hints:3,nodes:[],clock:null};
+
 var TIP='셀을 클릭하면 주변 오류 개수가 계산됩니다.   오른쪽 클릭: 검토 표시   Esc: 원장 보기';
 
 function colName(n){ var s=""; n++; while(n>0){ var m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-m-1)/26; } return s; }
@@ -482,6 +500,10 @@ function hash(s){ var h=5381,i; for(i=0;i<s.length;i++) h=((h*33)^s.charCodeAt(i
 function isGame(){ return cur.charAt(0)==="g"; }
 function isApple(){ return cur==="ap"; }
 function ai(r,c){ if(!isApple()) return -1; var y=r-B_R, x=c-B_C; return (y>=0&&y<AP_R&&x>=0&&x<AP_C) ? y*AP_C+x : -1; }
+function isVal(){ return cur==="val"; }
+function isHeat(){ return cur==="heat"; }
+function vi(r,c){ if(!isVal()) return null; var y=r-B_R, x=c-1; return (y>=0&&y<VL_ROWS&&x>=0&&x<10) ? {y:y,x:x} : null; }
+function hi(r,c){ if(!isHeat()) return -1; var y=r-B_R, x=c-B_C; return (y>=0&&y<HT_R&&x>=0&&x<HT_C) ? y*HT_C+x : -1; }
 
 /* ── 게임판 좌표 ↔ 시트 좌표 ── */
 function gi(r,c){ if(!isGame()) return -1; var y=r-B_R, x=c-B_C; return (y>=0&&y<R&&x>=0&&x<C) ? y*C+x : -1; }
@@ -515,7 +537,7 @@ function allRecs(){
 function mergeRec(r){
   if(!r) return false;
   var name=String(r.name||"").replace(/\s+/g," ").trim().slice(0,12), g=+r.lv, t=+r.secs;
-  if(!name||!(g>=0&&g<=3)||!(t>0&&t<200000)) return false;
+  if(!name||!(g>=0&&g<=5)||!(t>0&&t<200000)) return false;
   var rec={key:r.key||(g+"_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6)), name:name, lv:g, secs:Math.round(t), at:String(r.at||today()).slice(0,5)};
   var arr=localRecs(), i;
   for(i=0;i<arr.length;i++){ var o=arr[i]; if(o.key===rec.key||(o.name===rec.name&&o.lv===rec.lv&&o.secs===rec.secs&&o.at===rec.at)) return false; }
@@ -760,6 +782,145 @@ function apEnd(){
 function say(html){ note=html; fline.innerHTML=html; }
 
 /* ═══════════════════════════════════════════════════════
+   데이터 검증(오류 찾기): 원장 40행에 오류 8종을 심고 찾아 표시한다
+   ═══════════════════════════════════════════════════════ */
+var TYPO={"김도현":"김도헌","이서연":"이서현","박준영":"박준엉","최민지":"최민치","정우진":"정우전","한지우":"한자우","오세훈":"오세운","윤하늘":"윤하눌","장예린":"장애린","강태오":"강태호","임수아":"임수야","조민재":"조민제"};
+var STYPO={"완료":"왼료","승인":"숭인","배송중":"배손중","운송중":"운숑중","보류":"보루","대기":"대이","취소":"쥐소","반려":"반러","지연":"지언","통관중":"동관중"};
+var ERRNAME={date:"날짜 형식 오류",code:"코드 오타(0→O)",name:"담당자 오타",status:"상태값 오타",neg:"음수 수량",rel:"계산 불일치",dup:"중복 번호",vendor:"거래처/부서 오타"};
+function vlNew(){
+  var rows=rawRows(role).slice(0,VL_ROWS).map(function(r){ return r.slice(); }), i, used={}, errs=[];
+  function row(){ var r; do{ r=Math.floor(Math.random()*VL_ROWS); }while(used[r]); used[r]=1; return r; }
+  var types=["date","code","name","status","neg","rel","dup","vendor"], t;
+  for(i=types.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); t=types[i]; types[i]=types[j]; types[j]=t; }
+  for(i=0;i<VL_N;i++){
+    var r=row(), c, ty=types[i%types.length];
+    if(ty==="date"){ c=1; rows[r][c]=Math.random()<.5?"2026-09-31":"2026-13-"+("0"+(1+Math.floor(Math.random()*28))).slice(-2); }
+    else if(ty==="code"){ c=0; rows[r][c]=rows[r][c].replace(/0(?=[^0]*$)/,"O"); }
+    else if(ty==="name"){ c=8; rows[r][c]=TYPO[rows[r][c]]||(rows[r][c]+"ㅣ"); }
+    else if(ty==="status"){ c=9; rows[r][c]=STYPO[rows[r][c]]||(rows[r][c]+"됨"); }
+    else if(ty==="neg"){ c=5; var d=rows[r][c].replace(/,/g,"").slice(0,2); rows[r][c]="-"+(d||"7"); }
+    else if(ty==="rel"){
+      if(role===1){ c=7; rows[r][c]=comma(+rows[r][5].replace(/,/g,"")*+rows[r][6].replace(/,/g,"")+500); }
+      else if(role===2){ c=rows[r][5]?6:5; rows[r][c]=comma((30+Math.floor(Math.random()*400))*10000); }
+      else { c=6; rows[r][c]=String(1+Math.floor(Math.random()*9)); }
+    }
+    else if(ty==="dup"){ c=0; var src=(r+1+Math.floor(Math.random()*(VL_ROWS-1)))%VL_ROWS; rows[r][c]=rows[src][c]; }
+    else { c=role===2?3:2; var vv=rows[r][c], last=vv.slice(-1), sub={"팀":"틈","터":"타","트":"드","스":"즈","몰":"물","항":"함"}[last]; rows[r][c]=sub?vv.slice(0,-1)+sub:vv+"ㅅ"; }
+    errs.push({y:r,x:c,ty:ty,found:false});
+  }
+  vl.rows=rows; vl.errs=errs; vl.found=0; vl.live=false; vl.over=false; vl.hints=3; note=null; pending=null;
+  if(vl.clock) vl.clock.reset(); else vl.clock=Clock(vlInfo);
+}
+function vlInfo(){
+  if(!isVal()||!infoEl) return;
+  var t=vl.clock.secs();
+  if(vl.over&&vl.found===VL_N){ infoEl.className="x score"; infoEl.textContent="검증 완료 · "+clock(t); return; }
+  if(vl.over){ infoEl.className="x info r urgent"; infoEl.textContent="시간 초과 · "+vl.found+"/"+VL_N; return; }
+  infoEl.className="x info r"+(VL_LIMIT-t<=10?" urgent":"");
+  infoEl.textContent="검증 "+vl.found+"/"+VL_N+" · 남은 "+clock(Math.max(0,VL_LIMIT-t));
+  if(t>=VL_LIMIT&&vl.live){ vl.over=true; vl.clock.hold(); vlInfo(); say('<b>#N/A</b> 제한 시간 초과 — '+vl.found+'/'+VL_N+' 검증. ‘다시 계산’(R)으로 새 데이터.'); }
+}
+function vlClick(y,x){
+  if(vl.over||pending!==null) return;
+  if(!vl.live){ vl.live=true; vl.clock.start(); }
+  var k, el=vl.nodes[y*10+x];
+  for(k=0;k<vl.errs.length;k++){
+    var e=vl.errs[k];
+    if(e.y===y&&e.x===x){
+      if(e.found) return;
+      e.found=true; vl.found++; if(el) el.classList.add("good");
+      say('<b class="ok">확인</b> '+A1(B_R+y,1+x)+' — '+ERRNAME[e.ty]+' ('+vl.found+'/'+VL_N+')');
+      if(vl.found===VL_N){ vl.over=true; vl.clock.hold(); vlInfo(); askName(4, vl.clock.secs(), '<b class="ok">검증 완료</b> '+ROLES[role].val+' '+dur(vl.clock.secs())); }
+      else vlInfo();
+      return;
+    }
+  }
+  vl.clock.add(VL_PEN);
+  if(el){ el.classList.add("na"); setTimeout(function(){ el.classList.remove("na"); },300); }
+  say('<b>#VALUE!</b> '+A1(B_R+y,1+x)+' 은 정상 데이터입니다. (+'+VL_PEN+'초)'); vlInfo();
+}
+function vlHint(){
+  if(vl.over||!vl.live){ say('먼저 셀을 하나 표시해 주세요.'); return; }
+  if(vl.hints<=0){ say('참조 검사 횟수를 모두 사용했습니다.'); return; }
+  var left=vl.errs.filter(function(e){ return !e.found; }); if(!left.length) return;
+  var e=left[Math.floor(Math.random()*left.length)]; vl.hints--;
+  var k, els=[]; for(k=0;k<10;k++){ var n=vl.nodes[e.y*10+k]; if(n){ n.classList.add("look"); els.push(n); } }
+  setTimeout(function(){ els.forEach(function(n){ n.classList.remove("look"); }); },2000);
+  setSel(B_R+e.y,1);
+  say((B_R+e.y+1)+'행에 검증 필요 항목이 있습니다. (남은 검사 '+vl.hints+'회)');
+}
+
+/* ═══════════════════════════════════════════════════════
+   히트맵(숨은 그림): 색조 서식 속에 도형 5개가 숨어 있다
+   ═══════════════════════════════════════════════════════ */
+var SHAPES=[
+  ["하트",[".#.#.","#####","#####",".###.","..#.."]],
+  ["별",["..#..",".###.","#####",".###.","#.#.#"]],
+  ["화살표",["..#..","..##.","#####","..##.","..#.."]],
+  ["십자",["..#..","..#..","#####","..#..","..#.."]],
+  ["마름모",["..#..",".###.","#####",".###.","..#.."]],
+  ["사각 고리",["####","#..#","#..#","####"]],
+  ["체크",["....#","...#.","#.#..",".#..."]],
+  ["번개",["..##",".##.","####","..#.",".#.."]],
+  ["집",["..#..",".###.","#####",".#.#.",".###."]],
+  ["계단",["#...","##..","###.","####"]]
+];
+function htNew(){
+  var n=HT_C*HT_R, i, vals=[], owner=[], shapes=[], pool=SHAPES.slice(), tries=0;
+  for(i=0;i<n;i++){ var u=Math.random(); vals.push(28+Math.floor(u*u*36)); owner.push(-1); }
+  while(shapes.length<HT_N&&pool.length&&tries<400){
+    tries++;
+    var si=Math.floor(Math.random()*pool.length), sh=pool[si], m=sh[1], h=m.length, w=m[0].length;
+    var oy=1+Math.floor(Math.random()*(HT_R-h-2)), ox=1+Math.floor(Math.random()*(HT_C-w-2)), ok=true, y, x, cells=[];
+    for(y=-1;y<=h&&ok;y++) for(x=-1;x<=w;x++){ var yy=oy+y, xx=ox+x; if(yy<0||yy>=HT_R||xx<0||xx>=HT_C) continue; if(owner[yy*HT_C+xx]>=0){ ok=false; break; } }
+    if(!ok) continue;
+    for(y=0;y<h;y++) for(x=0;x<w;x++) if(m[y].charAt(x)==="#"){ var k=(oy+y)*HT_C+ox+x; owner[k]=shapes.length; vals[k]=64+Math.floor(Math.random()*9); cells.push(k); }
+    shapes.push({name:sh[0],cells:cells,found:false}); pool.splice(si,1);
+  }
+  ht.vals=vals; ht.owner=owner; ht.shapes=shapes; ht.found=0; ht.live=false; ht.over=false; ht.hints=3; note=null; pending=null;
+  if(ht.clock) ht.clock.reset(); else ht.clock=Clock(htInfo);
+}
+function heatColor(v){ /* Excel 3색 색조: 초록(0) → 노랑(50) → 빨강(100) */
+  var a,b,t; if(v<50){ a=[99,190,123]; b=[255,235,132]; t=v/50; } else { a=[255,235,132]; b=[248,105,107]; t=(v-50)/50; }
+  return "rgb("+Math.round(a[0]+(b[0]-a[0])*t)+","+Math.round(a[1]+(b[1]-a[1])*t)+","+Math.round(a[2]+(b[2]-a[2])*t)+")";
+}
+function htInfo(){
+  if(!isHeat()||!infoEl) return;
+  var t=ht.clock.secs();
+  if(ht.over&&ht.found===ht.shapes.length){ infoEl.className="x score"; infoEl.textContent="검토 완료 · "+clock(t); return; }
+  if(ht.over){ infoEl.className="x info r urgent"; infoEl.textContent="시간 초과 · "+ht.found+"/"+ht.shapes.length; return; }
+  infoEl.className="x info r"+(HT_LIMIT-t<=10?" urgent":"");
+  infoEl.textContent="이상 구역 "+ht.found+"/"+ht.shapes.length+" · 남은 "+clock(Math.max(0,HT_LIMIT-t));
+  if(t>=HT_LIMIT&&ht.live){ ht.over=true; ht.clock.hold(); htInfo(); say('<b>#N/A</b> 제한 시간 초과 — '+ht.found+'/'+ht.shapes.length+' 구역. ‘다시 계산’(R)으로 새 데이터.'); }
+}
+function htClick(i){
+  if(ht.over||pending!==null) return;
+  if(!ht.live){ ht.live=true; ht.clock.start(); }
+  var o=ht.owner[i], el=ht.nodes[i];
+  if(o>=0){
+    var sh=ht.shapes[o]; if(sh.found) return;
+    sh.found=true; ht.found++;
+    sh.cells.forEach(function(k){ if(ht.nodes[k]) ht.nodes[k].classList.add("hit"); });
+    say('<b class="ok">확인</b> 이상 구역 — '+sh.name+' 패턴 ('+ht.found+'/'+ht.shapes.length+')');
+    if(ht.found===ht.shapes.length){ ht.over=true; ht.clock.hold(); htInfo(); askName(5, ht.clock.secs(), '<b class="ok">검토 완료</b> '+ROLES[role].heat+' '+dur(ht.clock.secs())); }
+    else htInfo();
+    return;
+  }
+  ht.clock.add(HT_PEN);
+  if(el){ el.classList.add("na"); setTimeout(function(){ el.classList.remove("na"); },300); }
+  say('<b>#VALUE!</b> 정상 범위 값입니다. (+'+HT_PEN+'초)'); htInfo();
+}
+function htHint(){
+  if(ht.over||!ht.live){ say('먼저 셀을 하나 클릭해 주세요.'); return; }
+  if(ht.hints<=0){ say('참조 검사 횟수를 모두 사용했습니다.'); return; }
+  var left=ht.shapes.filter(function(s){ return !s.found; }); if(!left.length) return;
+  var sh=left[Math.floor(Math.random()*left.length)], k=sh.cells[Math.floor(Math.random()*sh.cells.length)]; ht.hints--;
+  var el=ht.nodes[k]; if(el){ el.classList.add("look"); setTimeout(function(){ el.classList.remove("look"); },2000); }
+  setSel(B_R+Math.floor(k/HT_C),B_C+k%HT_C);
+  say('이 근처에 이상 구역이 있습니다. (남은 검사 '+ht.hints+'회)');
+}
+
+/* ═══════════════════════════════════════════════════════
    시트 렌더링 — 모든 시트는 하나의 큰 격자 위에 그린다
    ═══════════════════════════════════════════════════════ */
 function content(){
@@ -794,6 +955,35 @@ function content(){
     put(B_R+AP_R+1,1,"※ 잔량 합이 정확히 10이 되는 구역을 범위 선택하면 소거됩니다. 제한 시간 2분.","dim spill");
     out.needC=Math.max(out.needC,B_C+AP_C+2); out.needR=Math.max(out.needR,B_R+AP_R+4);
   }
+  else if(isVal()){
+    if(!vl.rows.length) vlNew();
+    var al2=R0.rawAlign;
+    for(j=0;j<10;j++) out.w[1+j]=R0.rawW[j];
+    put(1,1,R0.valTitle,"big spill");
+    put(1,6,"","info r",{info:true,span:5});
+    for(j=0;j<10;j++) put(B_R-1,1+j,R0.rawHead[j],"th");
+    for(i=0;i<VL_ROWS;i++) for(j=0;j<10;j++){
+      var cl2="tl "+al2[j]+(i%2?" band":"");
+      for(var q=0;q<vl.errs.length;q++) if(vl.errs[q].found&&vl.errs[q].y===i&&vl.errs[q].x===j) cl2+=" good";
+      put(B_R+i,1+j,vl.rows[i][j],cl2);
+    }
+    put(B_R+VL_ROWS+1,1,"※ 오류가 있는 셀을 클릭해 표시하세요. 정상 셀을 표시하면 "+VL_PEN+"초 가산. 항목 "+VL_N+"개, 제한 "+Math.floor(VL_LIMIT/60)+"분.","dim spill");
+    out.needR=Math.max(out.needR,B_R+VL_ROWS+4); out.needC=Math.max(out.needC,13);
+  }
+  else if(isHeat()){
+    if(!ht.vals.length) htNew();
+    out.w[1]=110; for(j=0;j<HT_C;j++) out.w[B_C+j]=40;
+    put(1,1,R0.heatTitle,"big spill");
+    put(1,B_C+HT_C-5,"","info r",{info:true,span:5});
+    put(B_R-1,1,R0.rowHdr,"th");
+    for(j=0;j<HT_C;j++) put(B_R-1,B_C+j,"9/"+(j+1),"th");
+    for(i=0;i<HT_R;i++){
+      put(B_R+i,1,R0.rowLbl(i),"tl band");
+      for(j=0;j<HT_C;j++){ var k2=i*HT_C+j, o2=ht.owner[k2]; put(B_R+i,B_C+j,String(ht.vals[k2]),"tl r heat"+(o2>=0&&ht.shapes[o2].found?" hit":""),{bg:heatColor(ht.vals[k2])}); }
+    }
+    put(B_R+HT_R+1,1,"※ 색조 서식에서 주변과 다른 이상 패턴 구역을 찾아 클릭하세요. 정상 구역을 클릭하면 "+HT_PEN+"초 가산. 구역 "+HT_N+"개, 제한 "+Math.floor(HT_LIMIT/60)+"분.","dim spill");
+    out.needC=Math.max(out.needC,B_C+HT_C+2); out.needR=Math.max(out.needR,B_R+HT_R+4);
+  }
   else if(cur==="raw"){
     var rows=rawRows(role), al=R0.rawAlign;
     for(j=0;j<R0.rawHead.length;j++){ out.w[j]=R0.rawW[j]; put(0,j,R0.rawHead[j],"th"); }
@@ -812,7 +1002,7 @@ function content(){
     put(1,1,R0.sTitle,"big spill");
     put(2,1,"집계 기준: 최근 처리분  ·  단위: 건  ·  작성: "+R0.who+"  ·  담당 "+Object.keys(who).length+"명  ·  "+(cloudOn?"실시간 집계":"행 선택 시 참조 코드 복사"),"dim spill");
     for(j=0;j<6;j++) put(rr,1+j,R0.head[j],"th"); rr++;
-    for(g=0;g<4;g++){
+    for(g=0;g<6;g++){
       var grp=[]; for(i=0;i<list.length;i++) if(list[i].lv===g) grp.push(list[i]);
       grp.sort(function(a,b){ return a.secs-b.secs; }); grp=grp.slice(0,5);
       if(!grp.length) continue;
@@ -820,9 +1010,11 @@ function content(){
       for(i=0;i<grp.length;i++){
         var rec=grp[i], qty, tm, pct;
         if(isAp){ qty=100000-rec.secs; tm=AP_TIME; pct=qty/Math.max(1,100000-top)*100; }
+        else if(g===4){ qty=VL_N; tm=rec.secs; pct=top/(rec.secs||1)*100; }
+        else if(g===5){ qty=HT_N; tm=rec.secs; pct=top/(rec.secs||1)*100; }
         else { qty=GRADE[g].c*GRADE[g].r-GRADE[g].m; tm=rec.secs; pct=top/(rec.secs||1)*100; }
         rows2++; sq+=qty; ss+=tm; sp+=pct;
-        var v=[isAp?R0.ap:R0.sheets[g],rec.name,rec.at||"",comma(qty),dur(tm),pct.toFixed(1)+"%"], a=["l","l","c","r","r","r"];
+        var v=[isAp?R0.ap:g===4?R0.val:g===5?R0.heat:R0.sheets[g],rec.name,rec.at||"",comma(qty),dur(tm),pct.toFixed(1)+"%"], a=["l","l","c","r","r","r"];
         for(k=0;k<6;k++) put(rr,1+k,v[k],"tl "+a[k]+(i===0?" bold":"")+(rec.key===myKey?" me":(rows2%2?"":" band")),{ri:shown.length});
         shown.push(rec); rr++;
       }
@@ -848,11 +1040,13 @@ function render(){
   for(r=0;r<nrows;r++){
     html+='<div class="h rh" data-r="'+r+'">'+(r+1)+'</div>';
     for(c=0;c<ncols;c++){
-      var o=ct.cells[r+","+c], cls="x", attrs="", t="";
+      var o=ct.cells[r+","+c], cls="x", attrs="", t="", st="";
       if(skip>0){ skip--; cls+=" gone"; o=null; }
       if(o){
         cls+=" "+o.cls; t=esc(o.t);
-        if(o.span){ attrs+=' style="grid-column:span '+o.span+'"'; skip=o.span-1; }
+        if(o.span){ st+="grid-column:span "+o.span+";"; skip=o.span-1; }
+        if(o.bg){ st+="background:"+o.bg+";"; }
+        if(st) attrs+=' style="'+st+'"';
         if(o.i!==undefined) attrs+=' data-i="'+o.i+'"';
         if(o.ri!==undefined) attrs+=' data-ri="'+o.ri+'"';
         if(o.all) attrs+=' data-all="1"';
@@ -873,7 +1067,15 @@ function render(){
     for(i=0;i<C*R;i++) paint(i);
     info();
   }
-  apNodes=[]; rng=[]; drag=null;
+  apNodes=[]; rng=[]; drag=null; vl.nodes=[]; ht.nodes=[];
+  if(isVal()){
+    for(i=0;i<VL_ROWS*10;i++) vl.nodes.push(cellAt(B_R+Math.floor(i/10),1+i%10));
+    infoEl=cellAt(1,6); vlInfo();
+  }
+  if(isHeat()){
+    for(i=0;i<HT_C*HT_R;i++) ht.nodes.push(cellAt(B_R+Math.floor(i/HT_C),B_C+i%HT_C));
+    infoEl=cellAt(1,B_C+HT_C-5); htInfo();
+  }
   if(isApple()){
     for(i=0;i<AP_C*AP_R;i++) apNodes.push(cellAt(B_R+Math.floor(i/AP_C),B_C+i%AP_C));
     infoEl=cellAt(1,B_C+AP_C-5);
@@ -882,6 +1084,8 @@ function render(){
   // 커서: 시트에 맞는 자연스러운 위치
   if(isGame()) { if(gi(sel.r,sel.c)<0) sel={r:B_R,c:B_C}; }
   else if(isApple()) { if(ai(sel.r,sel.c)<0) sel={r:B_R,c:B_C}; }
+  else if(isVal()) { if(!vi(sel.r,sel.c)) sel={r:B_R,c:1}; }
+  else if(isHeat()) { if(hi(sel.r,sel.c)<0) sel={r:B_R,c:B_C}; }
   else if(cur==="raw") { if(sel.r<1||sel.r>60) sel={r:12,c:7}; }
   else { sel={r:ct.hasTot?ct.sumRow:5, c:ct.hasTot?5:2}; }
   setSel(sel.r,sel.c);
@@ -932,6 +1136,17 @@ function formula(){
     if(el&&el.dataset.info){ fline.textContent='="남은 "&TEXT($A$1-NOW(),"m:ss")&" · 정리 "&COUNTBLANK(C5:S14)&"개"'; return; }
     fline.textContent=t; return;
   }
+  if(isVal()){
+    var pv=vi(sel.r,sel.c);
+    if(pv&&!vl.live) { fline.innerHTML='<span class="dim">오류가 있는 셀을 찾아 클릭하세요. 날짜·코드·이름·상태·수량·금액·중복·거래처 순으로 살펴보면 빠릅니다.</span>'; return; }
+    fline.textContent=t; return;
+  }
+  if(isHeat()){
+    var ph=hi(sel.r,sel.c);
+    if(ph>=0&&!ht.live) { fline.innerHTML='<span class="dim">색조 서식에서 주변과 결이 다른 패턴을 찾아 클릭하세요. 상태 표시줄 평균과 비교하면 도움이 됩니다.</span>'; return; }
+    if(ph>=0){ fline.textContent="=ROUND(원본데이터!H"+(sel.r+1)+"/AVERAGE(원본데이터!H:H)*50,0)"; return; }
+    fline.textContent=t; return;
+  }
   if(cur==="raw"){
     var r=sel.r, c2=sel.c;
     if(r>=1&&r<=60){
@@ -948,6 +1163,8 @@ function stats(){
   var n=0,s=0,i;
   if(isGame()){ for(i=0;i<cells.length;i++) if(cells[i].open){ n++; s+=cells[i].adj; } $("avg").textContent=n?(s/n).toFixed(1):"-"; $("cnt").textContent=n; $("sum").textContent=s; }
   else if(isApple()){ if(drag) return; for(i=0;i<ap.length;i++) if(ap[i]){ n++; s+=ap[i]; } $("avg").textContent=n?(s/n).toFixed(1):"-"; $("cnt").textContent=n; $("sum").textContent=s; }
+  else if(isVal()){ $("avg").textContent="-"; $("cnt").textContent=String(VL_ROWS*10); $("sum").textContent="-"; }
+  else if(isHeat()){ for(i=0;i<ht.vals.length;i++){ n++; s+=ht.vals[i]; } $("avg").textContent=n?(s/n).toFixed(1):"-"; $("cnt").textContent=n; $("sum").textContent=comma(s); }
   else if(cur==="raw"){ $("avg").textContent="-"; $("cnt").textContent="60"; $("sum").textContent="-"; }
   else { var list=allRecs(), m=0; for(i=0;i<list.length;i++) if(list[i].lv!==3){ m++; s+=list[i].secs; } $("avg").textContent=m?dur(Math.round(s/m)):"-"; $("cnt").textContent=list.length; $("sum").textContent=dur(s); }
 }
@@ -959,6 +1176,8 @@ function go(id){
   if(id===cur) return;
   if(isGame()) holdClock();
   if(isApple()) apHold();
+  if(isVal()&&vl.clock) vl.clock.hold();
+  if(isHeat()&&ht.clock) ht.clock.hold();
   prev=cur; cur=id;
   note=null;
   if(isGame()){
@@ -968,6 +1187,8 @@ function go(id){
   render();
   if(isGame()&&live&&!over) runClock();
   if(isApple()&&apLive&&!apOver) apRunClock();
+  if(isVal()&&vl.live&&!vl.over) vl.clock.start();
+  if(isHeat()&&ht.live&&!ht.over) ht.clock.start();
   sw.focus();
 }
 function tabs(){
@@ -976,6 +1197,8 @@ function tabs(){
   h+=t("sum",R0.sum);
   for(var i=0;i<3;i++) h+=t("g"+i,R0.sheets[i]);
   h+=t("ap",R0.ap);
+  h+=t("val",R0.val);
+  h+=t("heat",R0.heat);
   h+=t("raw",R0.raw);
   $("tabs").innerHTML=h;
 }
@@ -1009,6 +1232,8 @@ grid.addEventListener("mousedown",function(e){
     return;
   }
   if(e.button!==0) return;
+  var pv=vi(t.r,t.c); if(pv){ vlClick(pv.y,pv.x); return; }
+  var ph=hi(t.r,t.c); if(ph>=0){ htClick(ph); return; }
   var k=ai(t.r,t.c);
   if(k>=0){
     e.preventDefault();
@@ -1059,12 +1284,12 @@ document.addEventListener("keydown",function(e){
     if(i>=0&&pending===null){ if(cells[i].open) chord(i); else open(i); formula(); }
     else if(i<0) setSel(sel.r+1,sel.c);
   } else if(e.key==="f"||e.key==="F"||e.key==="ㄹ"){ if(i>=0){ e.preventDefault(); mark(i); formula(); } }
-  else if(e.key==="h"||e.key==="H"||e.key==="ㅗ"){ e.preventDefault(); look(); }
-  else if(e.key==="F5"||e.key==="r"||e.key==="R"||e.key==="ㄱ"){ if(isGame()||isApple()){ e.preventDefault(); restart(); } }
+  else if(e.key==="h"||e.key==="H"||e.key==="ㅗ"){ e.preventDefault(); if(isVal()) vlHint(); else if(isHeat()) htHint(); else look(); }
+  else if(e.key==="F5"||e.key==="r"||e.key==="R"||e.key==="ㄱ"){ if(isGame()||isApple()||isVal()||isHeat()){ e.preventDefault(); restart(); } }
 });
-function restart(){ if(isApple()) apNew(); else newBoard(); $("mode").textContent="준비"; render(); sw.focus(); }
+function restart(){ if(isApple()) apNew(); else if(isVal()) vlNew(); else if(isHeat()) htNew(); else newBoard(); $("mode").textContent="준비"; render(); sw.focus(); }
 
-$("newBtn").addEventListener("click",function(){ if(isGame()||isApple()) restart(); else go("g"+lv); });
+$("newBtn").addEventListener("click",function(){ if(isGame()||isApple()||isVal()||isHeat()) restart(); else go("g"+lv); });
 $("undoBtn").addEventListener("click",function(){ if(isGame()) restart(); });
 $("markBtn").addEventListener("click",function(){ markMode=!markMode; this.classList.toggle("on",markMode); $("mode").textContent=markMode?"검토 표시":"준비"; });
 $("tabs").addEventListener("click",function(e){ var t=e.target.closest("[data-go]"); if(t) go(t.dataset.go); });
