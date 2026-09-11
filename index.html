@@ -504,7 +504,7 @@ function localRecs(){ try{ var v=JSON.parse(localStorage.getItem("xl.recs")||"[]
 function allRecs(){
   var arr=localRecs(), i, k, byKey={};
   for(i=0;i<arr.length;i++) byKey[arr[i].key]=arr[i];
-  for(k in cloud){ var c=cloud[k]; if(c&&typeof c.name==="string"&&typeof c.secs==="number"&&(!byKey[k]||c.secs<=byKey[k].secs)) byKey[k]={key:k,name:String(c.name).slice(0,12),lv:+c.lv,secs:c.secs,at:String(c.at||"").slice(0,5)}; }
+  for(k in cloud){ var c=cloud[k]; if(c&&typeof c.name==="string"&&typeof c.secs==="number"&&!byKey[k]) byKey[k]={key:k,name:String(c.name).slice(0,12),lv:+c.lv,secs:c.secs,at:String(c.at||"").slice(0,5)}; }
   var out=[]; for(k in byKey) out.push(byKey[k]);
   return out;
 }
@@ -512,11 +512,12 @@ function mergeRec(r){
   if(!r) return false;
   var name=String(r.name||"").replace(/\s+/g," ").trim().slice(0,12), g=+r.lv, t=+r.secs;
   if(!name||!(g>=0&&g<=3)||!(t>0&&t<200000)) return false;
-  var rec={key:g+"_"+hash(name.toLowerCase()), name:name, lv:g, secs:Math.round(t), at:String(r.at||today()).slice(0,5)};
-  var arr=localRecs(), i, hit=-1;
-  for(i=0;i<arr.length;i++) if(arr[i].key===rec.key) hit=i;
-  if(hit<0) arr.push(rec); else if(rec.secs<arr[hit].secs) arr[hit]=rec; else return false;
+  var rec={key:r.key||(g+"_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6)), name:name, lv:g, secs:Math.round(t), at:String(r.at||today()).slice(0,5)};
+  var arr=localRecs(), i;
+  for(i=0;i<arr.length;i++){ var o=arr[i]; if(o.key===rec.key||(o.name===rec.name&&o.lv===rec.lv&&o.secs===rec.secs&&o.at===rec.at)) return false; }
+  arr.push(rec);
   try{ localStorage.setItem("xl.recs",JSON.stringify(arr.slice(-300))); }catch(e){}
+  r.key=rec.key;
   return true;
 }
 function b64e(s){ var b=new TextEncoder().encode(s), t="", i; for(i=0;i<b.length;i++) t+=String.fromCharCode(b[i]); return btoa(t).replace(/=+$/,"").replace(/\+/g,"-").replace(/\//g,"_"); }
@@ -564,10 +565,7 @@ var cloud={}, cloudOn=false, FB=null;
 function cloudPush(rec){
   if(!FB) return;
   try{
-    FB.ref("records/"+rec.key).transaction(function(old){
-      if(old&&typeof old.secs==="number"&&old.secs<=rec.secs) return; // 기존 기록이 더 빠르면 그대로
-      return {name:rec.name,lv:rec.lv,secs:rec.secs,at:rec.at};
-    });
+    FB.ref("records/"+rec.key).set({name:rec.name,lv:rec.lv,secs:rec.secs,at:rec.at});
   }catch(e){}
 }
 
@@ -682,7 +680,7 @@ function commit(){
   if(!nm){ el.focus(); return; }
   myName=nm; try{ localStorage.setItem("xl.name",nm); }catch(e){}
   var t=pending, g=pendLv; pending=null;
-  var rec={name:nm,lv:g,secs:t,at:today()}; mergeRec(rec); myKey=g+"_"+hash(nm.toLowerCase()); rec.key=myKey;
+  var rec={name:nm,lv:g,secs:t,at:today()}; mergeRec(rec); myKey=rec.key;
   cloudPush(rec);
   go("sum");
   if(cloudOn) say('<b class="ok">반영 완료</b> '+esc(nm)+' · '+recLabel(g,t)+' <span class="dim">실적이 공유 집계에 추가되었습니다.</span>');
@@ -804,7 +802,7 @@ function content(){
     for(j=0;j<6;j++) put(rr,1+j,R0.head[j],"th"); rr++;
     for(g=0;g<4;g++){
       var grp=[]; for(i=0;i<list.length;i++) if(list[i].lv===g) grp.push(list[i]);
-      grp.sort(function(a,b){ return a.secs-b.secs; }); grp=grp.slice(0,6);
+      grp.sort(function(a,b){ return a.secs-b.secs; }); grp=grp.slice(0,5);
       if(!grp.length) continue;
       var top=grp[0].secs||1, isAp=(g===3);
       for(i=0;i<grp.length;i++){
