@@ -829,10 +829,12 @@ function target(e){ var el=e.target.closest(".x"); if(!el) return null; return {
 
 grid.addEventListener("mousedown",function(e){
   var t=target(e); if(!t) return;
-  if(e.button!==0&&e.button!==2) return;
+  if(e.button!==0&&e.button!==1&&e.button!==2) return;
   setSel(t.r,t.c);
   var i=gi(t.r,t.c);
   if(i>=0){
+    /* 좌+우 동시(e.buttons===3) 또는 휠 클릭 = 코드: 숫자 주변을 한 번에 연다 */
+    if(e.buttons===3||e.button===1){ e.preventDefault(); chord(i); formula(); return; }
     if(e.button===2){ e.preventDefault(); mark(i); }
     else if(markMode) mark(i);
     else if(cells[i].open) chord(i);
